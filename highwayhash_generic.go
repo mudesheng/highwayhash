@@ -45,6 +45,31 @@ func initializeGeneric(state *[16]uint64, k []byte) {
 	}
 }
 
+func initializeGeneric64(state *[16]uint64, k []uint64) {
+	var key [4]uint64
+
+	key[0] = k[0]
+	key[1] = k[1]
+	key[2] = k[2]
+	key[3] = k[3]
+
+	copy(state[mul0:], init0[:])
+	copy(state[mul1:], init1[:])
+
+	for i, k := range key {
+		state[v0+i] = init0[i] ^ k
+	}
+
+	key[0] = key[0]>>32 | key[0]<<32
+	key[1] = key[1]>>32 | key[1]<<32
+	key[2] = key[2]>>32 | key[2]<<32
+	key[3] = key[3]>>32 | key[3]<<32
+
+	for i, k := range key {
+		state[v1+i] = init1[i] ^ k
+	}
+}
+
 func updateGeneric(state *[16]uint64, msg []byte) {
 	for len(msg) > 0 {
 		// add message
@@ -81,6 +106,45 @@ func updateGeneric(state *[16]uint64, msg []byte) {
 		zipperMerge(state[v0+0], state[v0+1], &state[v1+0], &state[v1+1])
 		zipperMerge(state[v0+2], state[v0+3], &state[v1+2], &state[v1+3])
 		msg = msg[32:]
+	}
+}
+
+func updateGeneric64(state *[16]uint64, msg []uint64) {
+	for len(msg) > 0 {
+		// add message
+		state[v1+0] += msg[0]
+		state[v1+1] += msg[1]
+		state[v1+2] += msg[2]
+		state[v1+3] += msg[3]
+
+		// v1 += mul0
+		state[v1+0] += state[mul0+0]
+		state[v1+1] += state[mul0+1]
+		state[v1+2] += state[mul0+2]
+		state[v1+3] += state[mul0+3]
+
+		state[mul0+0] ^= uint64(uint32(state[v1+0])) * (state[v0+0] >> 32)
+		state[mul0+1] ^= uint64(uint32(state[v1+1])) * (state[v0+1] >> 32)
+		state[mul0+2] ^= uint64(uint32(state[v1+2])) * (state[v0+2] >> 32)
+		state[mul0+3] ^= uint64(uint32(state[v1+3])) * (state[v0+3] >> 32)
+
+		// v0 += mul1
+		state[v0+0] += state[mul1+0]
+		state[v0+1] += state[mul1+1]
+		state[v0+2] += state[mul1+2]
+		state[v0+3] += state[mul1+3]
+
+		state[mul1+0] ^= uint64(uint32(state[v0+0])) * (state[v1+0] >> 32)
+		state[mul1+1] ^= uint64(uint32(state[v0+1])) * (state[v1+1] >> 32)
+		state[mul1+2] ^= uint64(uint32(state[v0+2])) * (state[v1+2] >> 32)
+		state[mul1+3] ^= uint64(uint32(state[v0+3])) * (state[v1+3] >> 32)
+
+		zipperMerge(state[v1+0], state[v1+1], &state[v0+0], &state[v0+1])
+		zipperMerge(state[v1+2], state[v1+3], &state[v0+2], &state[v0+3])
+
+		zipperMerge(state[v0+0], state[v0+1], &state[v1+0], &state[v1+1])
+		zipperMerge(state[v0+2], state[v0+3], &state[v1+2], &state[v1+3])
+		msg = msg[4:]
 	}
 }
 
@@ -122,6 +186,24 @@ func finalizeGeneric(out []byte, state *[16]uint64) {
 		binary.LittleEndian.PutUint64(out[16:], h0)
 		binary.LittleEndian.PutUint64(out[24:], h1)
 	}
+}
+
+func finalizeGeneric64(state *[16]uint64) uint64 {
+	var perm [4]uint64
+	var tmp [4]uint64
+	runs := 4
+	for i := 0; i < runs; i++ {
+		perm[0] = state[v0+2]>>32 | state[v0+2]<<32
+		perm[1] = state[v0+3]>>32 | state[v0+3]<<32
+		perm[2] = state[v0+0]>>32 | state[v0+0]<<32
+		perm[3] = state[v0+1]>>32 | state[v0+1]<<32
+
+		tmp = perm
+
+		updateGeneric64(state, tmp[:])
+	}
+
+	return state[v0+0] + state[v1+0] + state[mul0+0] + state[mul1+0]
 }
 
 func zipperMerge(v0, v1 uint64, d0, d1 *uint64) {

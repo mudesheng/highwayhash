@@ -23,6 +23,8 @@ const (
 	Size128 = 16
 	// Size64 is the size of HighwayHash-64 checksum in bytes.
 	Size64 = 8
+	// SizeUint64 is the size of HighwayHash-256 checksum in uint64s.
+	SizeUint64 = 4
 )
 
 var errKeySize = errors.New("highwayhash: invalid key size")
@@ -130,6 +132,24 @@ func Sum64(data, key []byte) uint64 {
 	return binary.LittleEndian.Uint64(hash[:])
 }
 
+func SumInput64Arr64(data, key []uint64) uint64 {
+	if len(key) != SizeUint64 {
+		panic(errKeySize)
+	}
+	var state [16]uint64
+	initializeGeneric64(&state, key)
+	if n := len(data) & (^(SizeUint64 - 1)); n > 0 {
+		updateGeneric64(&state, data[:n])
+		data = data[n:]
+	}
+	if len(data) > 0 {
+		var block [SizeUint64]uint64
+		offset := copy(block[:], data)
+		hashBuffer64(&state, &block, offset)
+	}
+	return finalizeGeneric64(&state)
+}
+
 type digest64 struct{ digest }
 
 func (d *digest64) Sum64() uint64 {
@@ -222,4 +242,24 @@ func hashBuffer(state *[16]uint64, buffer *[32]byte, offset int) {
 		binary.LittleEndian.PutUint32(block[16:], last)
 	}
 	update(state, block[:])
+}
+
+func hashBuffer64(state *[16]uint64, buffer *[4]uint64, offset int) {
+	var block [SizeUint64]uint64
+	mod32 := (uint64(offset) << 32) + uint64(offset)
+	for i := range state[:4] {
+		state[i] += mod32
+	}
+	for i := range state[4:8] {
+		t0 := uint32(state[i+4])
+		t0 = (t0 << uint(offset)) | (t0 >> uint(32-offset))
+
+		t1 := uint32(state[i+4] >> 32)
+		t1 = (t1 << uint(offset)) | (t1 >> uint(32-offset))
+
+		state[i+4] = (uint64(t1) << 32) | uint64(t0)
+	}
+
+	copy(block[:], buffer[:])
+	updateGeneric64(state, block[:])
 }
